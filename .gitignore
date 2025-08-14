@@ -14,7 +14,6 @@
 *.sublime-project
 
 # Project specific
-/var/*
 !/var/.gitkeep
 /docker/volumes/*
 !/docker/volumes/.gitkeep
