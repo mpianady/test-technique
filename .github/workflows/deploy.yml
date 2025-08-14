@@ -7,6 +7,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      SSH_PORT: ${{ secrets.SSH_PORT }} # optionnel. Si vide, on utilisera 22
 
     steps:
       - name: Checkout code
@@ -21,33 +23,47 @@ jobs:
       - name: Create .env file
         run: |
           cat <<EOF > .env
+          APP_ENV=prod
           GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
           DEFAULT_DATE=${{ vars.DEFAULT_DATE }}
           EOF
 
       - name: Ensure remote directory exists
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} "mkdir -p ~/meteo-app"
+          ssh -p "${SSH_PORT:-22}" -o StrictHostKeyChecking=no \
+            ${{ secrets.USERNAME }}@${{ secrets.HOST }} "mkdir -p ~/meteo-app"
 
       - name: Upload .env to VPS
         run: |
-          scp -o StrictHostKeyChecking=no .env ${{ secrets.USERNAME }}@${{ secrets.HOST }}:~/meteo-app/.env
+          scp -P "${SSH_PORT:-22}" -o StrictHostKeyChecking=no \
+            .env ${{ secrets.USERNAME }}@${{ secrets.HOST }}:~/meteo-app/.env
 
-      - name: Deploy to VPS
+      - name: Deploy to VPS (init/fetch/reset in-place)
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
-            set -e
-            cd ~/meteo-app
+          ssh -p "${SSH_PORT:-22}" -o StrictHostKeyChecking=no \
+            ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
+              set -euo pipefail
+              cd ~/meteo-app
 
-            echo "🔄 Sync repo (clone if missing)"
-            if [ ! -d .git ]; then
-              # ⚠️ Le serveur doit avoir une clé déployée qui a accès au repo privé
-              git clone git@github.com:${{ github.repository }} .
-            else
-              git pull --ff-only origin main
-            fi
+              echo "🔄 Sync repo (init or update)"
+              if [ -d .git ]; then
+                # Dépôt déjà initialisé : on met à jour
+                git remote get-url origin >/dev/null 2>&1 || git remote add origin git@github.com:${{ github.repository }}
+                git fetch --depth=1 origin main
+                git reset --hard origin/main
+              else
+                # Pas de .git : si dossier vide -> clone direct ; sinon init + fetch/reset
+                if [ -z "$(ls -A 2>/dev/null)" ]; then
+                  git clone git@github.com:${{ github.repository }} .
+                else
+                  git init
+                  git remote add origin git@github.com:${{ github.repository }} || true
+                  git fetch --depth=1 origin main
+                  git reset --hard origin/main
+                fi
+              fi
 
-            echo "🚀 Docker compose up"
-            docker compose down --remove-orphans || true
-            docker compose up -d --build
+              echo "🚀 Docker compose up"
+              docker compose down --remove-orphans || true
+              docker compose up -d --build
           EOF
