@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.*
+!.env.sample
+
+# PHP
+/vendor/
+composer.lock
+*.cache
+
+# IDE
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Project specific
+/var/*
+!/var/.gitkeep
+/docker/volumes/*
+!/docker/volumes/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
