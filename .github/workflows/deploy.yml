@@ -1,0 +1,53 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      # Crée le .env attendu par l'app (utilisé par PHP et/ou docker compose)
+      - name: Create .env file
+        run: |
+          cat <<EOF > .env
+          GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
+          DEFAULT_DATE=${{ vars.DEFAULT_DATE }}
+          EOF
+
+      - name: Ensure remote directory exists
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} "mkdir -p ~/meteo-app"
+
+      - name: Upload .env to VPS
+        run: |
+          scp -o StrictHostKeyChecking=no .env ${{ secrets.USERNAME }}@${{ secrets.HOST }}:~/meteo-app/.env
+
+      - name: Deploy to VPS
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.HOST }} << 'EOF'
+            set -e
+            cd ~/meteo-app
+
+            echo "🔄 Sync repo (clone if missing)"
+            if [ ! -d .git ]; then
+              # ⚠️ Le serveur doit avoir une clé déployée qui a accès au repo privé
+              git clone git@github.com:${{ github.repository }} .
+            else
+              git pull --ff-only origin main
+            fi
+
+            echo "🚀 Docker compose up"
+            docker compose down --remove-orphans || true
+            docker compose up -d --build
+          EOF
